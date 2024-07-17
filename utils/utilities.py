@@ -321,6 +321,10 @@ def sgp4(bstar, i0, o0, e0, w0, m0, n0, tsince):
     return eciPosn
 
 
+def calc_max_power_w(charge_c, capacitance_f, current_a, esr_ohm):
+    epsilon = 1e-6
+    return (esr_ohm * current_a + charge_c / capacitance_f) ** 2 / (4 * esr_ohm) - epsilon # epsilon to avoid invalid discriminant
+
 def calc_node_voltage_discriminant(charge_c, capacitance_f, current_a, esr_ohm, power_w):
     return (charge_c / capacitance_f + current_a * esr_ohm) ** 2 - 4 * power_w * esr_ohm
 

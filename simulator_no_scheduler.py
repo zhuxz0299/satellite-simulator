@@ -7,7 +7,7 @@ sys.path.append(utils_dir)
 
 from utils import constant as const
 from utils import utilities
-from utils.Devices import Camera, Computer, Rx, Tx
+from utils.Devices import Camera, Computer_no_scheduler, Rx, Tx
 from utils.Capacitor import Capacitor
 from utils.SolarArray import SolarArray
 from utils.DateTime import DateTime
@@ -170,7 +170,7 @@ def read_data_from_config():
     for satellite in satellite_list:
         sat_id = satellite.get_id()
         satid_to_camera[sat_id] = Camera()
-        satid_to_computer[sat_id] = Computer(computer_config)
+        satid_to_computer[sat_id] = Computer_no_scheduler(computer_config)
         satid_to_rx[sat_id] = Rx()
         satid_to_tx[sat_id] = Tx()
 

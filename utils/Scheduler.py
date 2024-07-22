@@ -4,12 +4,13 @@ import numpy as np
 import random
 
 class Tiled_image:
-    def __init__(self, w, h, deadline=0):
+    def __init__(self, w, h, complexity, deadline=0):
         self.w = w
         self.h = h
-        self.hard = random.choice([0, 1])  # whether the task is hard or not
-        # self.c = 112.4 * w * h / (640 * 640) * random.uniform(0.3, 3)  # complexity of the task, the unit is Gflops # TODO 这里假定计
-        self.c = (181.7 if self.hard else 112.4) * w * h / (640 * 640) # TODO 这里假定计算量是根据是否是hard task来决定的
+        # self.hard = random.choice([0, 1])  # whether the task is hard or not
+        # self.c = 112.4 * w * h / (640 * 640) * random.uniform(0.3, 3)  # complexity of the task, the unit is Gflops
+        # self.c = (181.7 if self.hard else 112.4) * w * h / (640 * 640) # TODO 这里假定计算量是根据是否是hard task来决定的
+        self.c = complexity
         self.deadline = deadline
 
     def get_size(self):
@@ -47,7 +48,7 @@ class Batch:
     # def resize_batch(self, batchsize):
     #     self.batchsize = batchsize
 
-class Deivce:
+class Device:
     v = 0  # velocity of the device
     batchsize = 0  # batch size of the device，限定的是最大的batch size
     # batchsize_peak = 0  # peak size of the batch 
@@ -70,30 +71,30 @@ class Deivce:
 
     def _calc_batch_size(self, tile_size):
         self.batchsize = min(math.floor(self.memory / tile_size), math.floor(self.power_headroom / self.power_per_tile))
-        if self.batchsize < 1:
+        if self.batchsize < 1: # 如果batchsize小于1，就设置为1，防止 group_tiles 函数出现死循环
             self.batchsize = 1
 
     def group_tiles(self):
-        print("tile num in devices: ", len(self.queue))
+        # print("tile num in devices: ", len(self.queue))
         if not self.queue: # 如果没有任务，直接返回
             return
-        print("\tgroup func start")
+        # print("\tgroup func start")
         self._calc_batch_size(self.queue[0].get_size())
-        print("batchsize: ", self.batchsize)
+        # print("batchsize: ", self.batchsize)
         while self.queue and self.resource < self.budget:
             batch = Batch()
-            print("create a new batch")
+            # print("create a new batch")
             for _ in range(self.batchsize):
                 new_tile = self.queue.pop(0) # 从队首取出一个tile
-                print("get a tile")
+                # print("get a tile")
                 batch.add_tile(new_tile)
-                print("add a tile, tile size: ", new_tile.get_size())
+                # print("add a tile, tile size: ", new_tile.get_size())
                 self.resource += new_tile.get_size() 
-                print("resource: ", self.resource)
+                # print("resource: ", self.resource)
                 if not self.queue:
                     break
             self.batches.append(batch)
-        print("\tgroup func end")
+        # print("\tgroup func end")
 
     def set_power_headroom(self, power_headroom): # power_headroom 应该会随着设备的使用而变化
         # ambient_temperature = 2.73 # 2.73K
@@ -154,14 +155,14 @@ class Scheduler:
 
     def __init__(self, config):
         self.N = config['N']
-        self.device_list = [Deivce(config)] * self.N  
+        self.device_list = [Device(config)] * self.N  
         self.T_wait = config['T_wait']  # maximum tolerable waiting time # TODO 参考了cote的数据，1.8s 为拍摄间隔
 
     def _get_partition_size(self, W, H):
         min_m = min(device.get_memory() for device in self.device_list)
         max_v = max(device.v for device in self.device_list)
         limit = min(min_m, max_v * self.T_wait * 640 * 640 / 112.4) # TODO 640*640 的一张图片，计算量为 112.4Gflops
-        partition = min(math.ceil(math.sqrt(W * H / limit)), 1)
+        partition = max(math.ceil(math.sqrt(W * H / limit)), 1) # TODO 之前是min，感觉是不小心写错了
         w = math.ceil(W / partition)
         h = math.ceil(H / partition)
         return partition, w, h
@@ -179,8 +180,10 @@ class Scheduler:
 
     def get_image(self, W, H):
         partition, w, h = self._get_partition_size(W, H)
-        tile_list = [Tiled_image(w, h, 0)] * partition * partition
-        print("tile_list size: ", len(tile_list))
+        hard = random.choice([0, 1])
+        complexity = (181.7 if hard else 112.4) * w * h / (640 * 640)
+        tile_list = [Tiled_image(w, h, complexity, 0)] * partition * partition
+        # print("tile_list size: ", len(tile_list))
         self._assign_tiles(tile_list)
 
     def power_allocation(self, available_power):

@@ -1,4 +1,7 @@
 from Scheduler import Scheduler
+from Scheduler import Device
+from Scheduler import Tiled_image
+import math
 
 class Camera:
     image_duration_s = 0.031260
@@ -119,7 +122,7 @@ class Computer:
         return self.scheduler.update_task(total_step_in_sec)
         
 
-    def assign_task(self): # TODO 这里出现了内存泄漏问题
+    def assign_task(self): # 这里出现了内存泄漏问题，已解决
         self.scheduler.get_image(self.image_w, self.image_h)
     
     def get_power(self): # 分为 OFF 和 WORK 两种状态，WORK 时的功率需要根据任务量来计算
@@ -147,6 +150,7 @@ class Computer:
     #     self.scheduler.power_allocation(self.power_budget)
 
 class Computer_no_scheduler:
+    N = 0 # number of devices
     task_duration_s = 0.044860
     state = 'OFF'
     prev_state = 'OFF'
@@ -160,8 +164,18 @@ class Computer_no_scheduler:
     def __init__(self, config):
         self.state = 'OFF'
         self.N = config['N'] # TODO 先假定有4个设备
+        self.device_list = [Device(config) for _ in range(self.N)]
+        self.power_budget_threshold = config['power_budget_threshold'] # power_budget 变化量超过这个值时，需要重新分配功率 # TODO 参考了mobi-com的数据
         self.image_w, self.image_h = config['image_w'], config['image_h'] # TODO 卫星拍到的一张图片的大小，参考cote的数据
-        self.device_memory = eval(config["memory"])
+
+    def _get_partition_size(self, W, H):
+        min_m = min(device.get_memory() for device in self.device_list)
+        max_v = max(device.v for device in self.device_list)
+        limit = min(min_m, max_v * self.T_wait * 640 * 640 / 112.4) # TODO 640*640 的一张图片，计算量为 112.4Gflops
+        partition = max(math.ceil(math.sqrt(W * H / limit)), 1) # TODO 之前是min，感觉是不小心写错了
+        w = math.ceil(W / partition)
+        h = math.ceil(H / partition)
+        return partition, w, h
     
     def set_state(self, state):
         self.state = state
@@ -182,32 +196,48 @@ class Computer_no_scheduler:
         return self.node_voltage
 
     def update_task(self, total_step_in_sec): # 返回处理好的tile的个数，要传给后面的tx设备
-        print("DEBUG: update_task start")
-        return self.scheduler.update_task(total_step_in_sec)
-        
+        tile_num = 0
+        for device in self.device_list:
+            tile_num += device.process_image(total_step_in_sec)
+            # device.calc_temperature(total_step_in_sec / 60) # delta_t 的单位是min
+        return tile_num    
 
     def assign_task(self):
-        print("DEBUG: assign_task start")
-        self.scheduler.get_image(self.image_w, self.image_h)
-        print("DEBUG: assign_task end")
+        partition, w, h = self._get_partition_size(self.image_w, self.image_h)
+        complexity = 181.7 * w * h / (640 * 640)
+        tile_list = [Tiled_image(w, h, complexity, 0)] * partition * partition
+        tile_num, cnt = len(tile_list), 0
+        while cnt < tile_num:
+            for device in self.device_list:
+                if cnt >= tile_num:
+                    break
+                device.add_tile(tile_list[cnt])
+                cnt += 1
+        for device in self.device_list:
+            device.group_tiles()
+
     
     def get_power(self): # 分为 OFF 和 WORK 两种状态，WORK 时的功率需要根据任务量来计算
-        print("DEBUG: get_power start")
         if self.state == 'OFF':
             return 0
         elif self.state == 'WORK':
-            return self.scheduler.get_power()
+            return sum(device.get_power() for device in self.device_list)
         
     def set_power_budget(self, power_budget):
-        print("DEBUG: set_power_budget start")
         self.prev_power_budget = self.power_budget
         self.power_budget = power_budget
         if abs(self.power_budget - self.prev_power_budget) > self.power_budget_threshold:
-            self.scheduler.power_allocation(self.power_budget)
-        print("DEBUG: set_power_budget end")
+            device_power_headroom = power_budget / self.N
+            for device in self.device_list:
+                device.set_power_headroom(device_power_headroom)
 
     def clear_buffer(self):
-        self.scheduler.clear_buffer()
+        for device in self.device_list:
+            device.queue = []
+            device.batches = []
+            device.total_complexity = 0
+            device.resource = 0
+            device.compute_time_s = 0.0
         
 class Rx:
     rx_duration_s = 0.044860 # TODO check this value

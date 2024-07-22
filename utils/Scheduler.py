@@ -1,17 +1,15 @@
 import math
 import heapq
 import numpy as np
-
+import random
 
 class Tiled_image:
-    w, h = 0, 0  # width and height of the image
-    c = 0  # complexity of the image # TODO to be determined
-    deadline = 0  # deadline of the image
-
-    def __init__(self, w, h, c, deadline=0):
+    def __init__(self, w, h, deadline=0):
         self.w = w
         self.h = h
-        self.c = c
+        self.hard = random.choice([0, 1])  # whether the task is hard or not
+        # self.c = 112.4 * w * h / (640 * 640) * random.uniform(0.3, 3)  # complexity of the task, the unit is Gflops # TODO 这里假定计
+        self.c = (181.7 if self.hard else 112.4) * w * h / (640 * 640) # TODO 这里假定计算量是根据是否是hard task来决定的
         self.deadline = deadline
 
     def get_size(self):
@@ -51,48 +49,59 @@ class Batch:
 
 class Deivce:
     v = 0  # velocity of the device
-    memory = 0  # memory of the device，即内存大小
-    queue = []  # queue of tasks of the device，相当于硬盘，所有任务都往里面存，不管能不能处理掉
-    total_complexity = 0  # total complexity of the tasks in the queue
-    resource = 0  # resource to be used by the device。resource 和 budget 这里假定为内存大小 # TODO 不过内存已经用memory限制过了，改成两次拍摄之间能够处理的任务量或许更合适一些
-    budget = 0  # budget of the device
     batchsize = 0  # batch size of the device，限定的是最大的batch size
     # batchsize_peak = 0  # peak size of the batch 
-    batches = []  # batch queue of the device，要考虑 budget 限制
     power_headroom = 0  # power headroom of the device，定义为当前分配给设备的功率
-    power_per_tile = 10/128  # power per tile of the device # TODO 这里用的是总功率除以core数量
-    temperature = 0  # temperature of the device, the unit is K
-    compute_time_s = 0.0  # compute time of the device
 
-    def __init__(self, memory):
-        self.memory = memory # 当前单位为pixcel # TODO 之后还要考虑模型参数占用的显存
-        self.queue = []
-        self.batches = []
-        self.total_complexity = 0
-        self.resource = 0
-        self.budget = memory
-        self.temperature = 298  # 25 degree Celsius
+    def __init__(self, config):
+        self.memory = eval(config['memory']) # TODO 之后还要考虑模型参数占用的显存
+        self.queue = [] # queue of tasks of the device，相当于硬盘，存放待处理的tile
+        self.batches = [] # batch queue of the device，要考虑 budget 限制
+        self.total_complexity = 0 # total complexity of the tasks in the queue
+        self.resource = 0 # resource to be used by the device。resource 和 budget 这里假定为内存大小 # TODO 不过内存已经用memory限制过了，改成两次拍摄之间能够处理的任务量或许更合适一些
+        self.budget = self.memory # TODO budget 包括了内存和功率两个方面
+        self.temperature = config['temperature']  # temperature of the device, the unit is K。 25 degree Celsius
+        self.top_temperature = config['top_temperature']  # 80 degree Celsius
+        self.compute_time_s = 0.0  # compute time of the device
+        self.power_per_tile = eval(config['power_per_tile'])  # power per tile of the device # TODO 这里用的是总功率除以core数量，可能不太合适
+        self.v_power_ratio = eval(config['v_power_ratio'])  # ratio of velocity and power # TODO 速度与功率的比值，这里假定是线性关系
+        self.alpha, self.beta = config['alpha'], config['beta'] # TODO temperature control parameters
+        # self.p_sun = config['P_sun']  # power of the sun when evaluate the temperature
 
     def _calc_batch_size(self, tile_size):
         self.batchsize = min(math.floor(self.memory / tile_size), math.floor(self.power_headroom / self.power_per_tile))
+        if self.batchsize < 1:
+            self.batchsize = 1
 
     def group_tiles(self):
+        print("tile num in devices: ", len(self.queue))
         if not self.queue: # 如果没有任务，直接返回
             return
+        print("\tgroup func start")
         self._calc_batch_size(self.queue[0].get_size())
+        print("batchsize: ", self.batchsize)
         while self.queue and self.resource < self.budget:
             batch = Batch()
+            print("create a new batch")
             for _ in range(self.batchsize):
                 new_tile = self.queue.pop(0) # 从队首取出一个tile
+                print("get a tile")
                 batch.add_tile(new_tile)
+                print("add a tile, tile size: ", new_tile.get_size())
                 self.resource += new_tile.get_size() 
+                print("resource: ", self.resource)
                 if not self.queue:
                     break
             self.batches.append(batch)
+        print("\tgroup func end")
 
     def set_power_headroom(self, power_headroom): # power_headroom 应该会随着设备的使用而变化
+        # ambient_temperature = 2.73 # 2.73K
+        # if self.temperature > self.top_temperature: # 如果温度超过了阈值，就不再分配功率
+        #     self.power_headroom = self.beta * (self.temperature - ambient_temperature) # 保持温度不变
+        # else:
         self.power_headroom = power_headroom
-        self.v = 47.2 * power_headroom # 速度与功率成正比 # TODO 此处系数表示 10W 对应 472Gflops
+        self.v = self.v_power_ratio * self.power_headroom # 速度与功率成正比
 
     # def set_budget(self, budget): # 不同位置会有不同的 budget
     #     self.budget = budget
@@ -111,10 +120,9 @@ class Deivce:
         # return np.power(P, -0.5)
         return 1
     
-    def calc_temperature(self):
-        alpha, beta = 0.1, 0.1 # TODO two coefficient, to be determined
+    def calc_temperature(self, delta_t):
         ambient_temperature = 2.73 # 2.73K
-        self.temperature += alpha * (self.power_headroom - beta * (self.temperature - ambient_temperature))
+        self.temperature += self.alpha * (self.power_headroom - self.beta * (self.temperature - ambient_temperature)) * delta_t # 拟合的时候delta_t的单位是min
         return self.temperature
     
     def process_image(self, total_step_in_sec): # 返回处理好的tile的个数，要传给后面的tx设备
@@ -141,12 +149,13 @@ class Deivce:
         
 class Scheduler:
     N = 0
-    T_wait = 1.8  # maximum tolerable waiting time # TODO 参考了cote的数据，1.8s 为拍摄间隔
+    
     device_list = []  # list of devices
 
-    def __init__(self, N):
-        self.N = N
-        self.device_list = [Deivce(300000000)] * N  # TODO the velocity and memory of the devices are to be determined
+    def __init__(self, config):
+        self.N = config['N']
+        self.device_list = [Deivce(config)] * self.N  
+        self.T_wait = config['T_wait']  # maximum tolerable waiting time # TODO 参考了cote的数据，1.8s 为拍摄间隔
 
     def _get_partition_size(self, W, H):
         min_m = min(device.get_memory() for device in self.device_list)
@@ -170,7 +179,8 @@ class Scheduler:
 
     def get_image(self, W, H):
         partition, w, h = self._get_partition_size(W, H)
-        tile_list = [Tiled_image(w, h, 3, 0)] * partition * partition  # TODO the complexity and deadline is to be determined
+        tile_list = [Tiled_image(w, h, 0)] * partition * partition
+        print("tile_list size: ", len(tile_list))
         self._assign_tiles(tile_list)
 
     def power_allocation(self, available_power):
@@ -194,7 +204,16 @@ class Scheduler:
         tile_num = 0
         for device in self.device_list:
             tile_num += device.process_image(total_step_in_sec)
+            # device.calc_temperature(total_step_in_sec / 60) # delta_t 的单位是min
         return tile_num
+    
+    def clear_buffer(self):
+        for device in self.device_list:
+            device.queue = []
+            device.batches = []
+            device.total_complexity = 0
+            device.resource = 0
+            device.compute_time_s = 0.0
 
 
 if __name__ == "__main__":

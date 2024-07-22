@@ -1,0 +1,14 @@
+N: 4 # number of devices
+power_budget_threshold: 1 # 1W
+image_w: 4096
+image_h: 3072 
+T_wait: 1.8 # 1.8s
+memory: 4e9/12 # 4GB，一个pixel 12 bytes
+temperature: 298 # 298K
+top_temperature: 353
+bottom_temperature: 248
+power_per_tile: 10/128 # total power 10W, 128 cores
+v_power_ratio: 472/10 # 472GFLOPS/10W
+alpha: 0.995 # temperature coefficient
+beta: 0.164 # temperature coefficient
+# P_sun: 3.7

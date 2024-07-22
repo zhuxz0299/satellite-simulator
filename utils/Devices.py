@@ -76,13 +76,14 @@ class Computer:
     compute_task_count = 0
     power_budget = 0
     prev_power_budget = 0
-    power_budget_threshold = 1 # power_budget 变化量超过这个值时，需要重新分配功率 # TODO 参考了mobi-com的数据
     # awake voltage: 6.75v
     
-    def __init__(self):
+    def __init__(self, config):
         self.state = 'OFF'
-        self.N = 4 # TODO 先假定有4个设备
-        self.scheduler = Scheduler(self.N) # 创建一个调度器
+        self.N = config['N'] # TODO 先假定有4个设备
+        self.scheduler = Scheduler(config) # 创建一个调度器
+        self.power_budget_threshold = config['power_budget_threshold'] # power_budget 变化量超过这个值时，需要重新分配功率 # TODO 参考了mobi-com的数据
+        self.image_w, self.image_h = config['image_w'], config['image_h'] # TODO 卫星拍到的一张图片的大小，参考cote的数据
     
     def set_state(self, state):
         self.state = state
@@ -116,10 +117,10 @@ class Computer:
 
     def update_task(self, total_step_in_sec): # 返回处理好的tile的个数，要传给后面的tx设备
         return self.scheduler.update_task(total_step_in_sec)
+        
 
-    def assign_task(self):
-        image_w, image_h = 4096, 3072 # TODO 卫星拍到的一张图片的大小，参考cote的数据
-        self.scheduler.get_image(image_w, image_h)
+    def assign_task(self): # TODO 这里出现了内存泄漏问题
+        self.scheduler.get_image(self.image_w, self.image_h)
     
     def get_power(self): # 分为 OFF 和 WORK 两种状态，WORK 时的功率需要根据任务量来计算
         if self.state == 'OFF':
@@ -139,8 +140,74 @@ class Computer:
         if abs(self.power_budget - self.prev_power_budget) > self.power_budget_threshold:
             self.scheduler.power_allocation(self.power_budget)
 
+    def clear_buffer(self):
+        self.scheduler.clear_buffer()
+
     # def allocate_power(self):
     #     self.scheduler.power_allocation(self.power_budget)
+
+class Computer_no_scheduler:
+    task_duration_s = 0.044860
+    state = 'OFF'
+    prev_state = 'OFF'
+    node_voltage = 0
+    compute_time_s = 0.0
+    compute_task_count = 0
+    power_budget = 0
+    prev_power_budget = 0
+    # awake voltage: 6.75v
+    
+    def __init__(self, config):
+        self.state = 'OFF'
+        self.N = config['N'] # TODO 先假定有4个设备
+        self.image_w, self.image_h = config['image_w'], config['image_h'] # TODO 卫星拍到的一张图片的大小，参考cote的数据
+        self.device_memory = eval(config["memory"])
+    
+    def set_state(self, state):
+        self.state = state
+
+    def get_state(self):
+        return self.state
+    
+    def set_prev_state(self, prev_state):
+        self.prev_state = prev_state
+
+    def get_prev_state(self):
+        return self.prev_state
+    
+    def set_node_voltage(self, node_voltage):
+        self.node_voltage = node_voltage
+
+    def get_node_voltage(self):
+        return self.node_voltage
+
+    def update_task(self, total_step_in_sec): # 返回处理好的tile的个数，要传给后面的tx设备
+        print("DEBUG: update_task start")
+        return self.scheduler.update_task(total_step_in_sec)
+        
+
+    def assign_task(self):
+        print("DEBUG: assign_task start")
+        self.scheduler.get_image(self.image_w, self.image_h)
+        print("DEBUG: assign_task end")
+    
+    def get_power(self): # 分为 OFF 和 WORK 两种状态，WORK 时的功率需要根据任务量来计算
+        print("DEBUG: get_power start")
+        if self.state == 'OFF':
+            return 0
+        elif self.state == 'WORK':
+            return self.scheduler.get_power()
+        
+    def set_power_budget(self, power_budget):
+        print("DEBUG: set_power_budget start")
+        self.prev_power_budget = self.power_budget
+        self.power_budget = power_budget
+        if abs(self.power_budget - self.prev_power_budget) > self.power_budget_threshold:
+            self.scheduler.power_allocation(self.power_budget)
+        print("DEBUG: set_power_budget end")
+
+    def clear_buffer(self):
+        self.scheduler.clear_buffer()
         
 class Rx:
     rx_duration_s = 0.044860 # TODO check this value

@@ -415,7 +415,6 @@ def main():
                     satellite.set_gnd_id_com(None)
                     satid_to_tx[sat_id].set_state('OFF')
                     satid_to_rx[sat_id].set_state('OFF')
-                    satid_to_computer[sat_id].clear_buffer() # TODO 在经过了通信之后，应当清空buffer，即计算任务也不需要继续处理了
             if satellite.get_gnd_id_com() is None: # if the satellite is not communicating with a ground station
                 for ground_station in ground_station_list:
                     gnd_lat = ground_station.get_lat()
@@ -554,34 +553,6 @@ def main():
             for ground_station in ground_station_list:
                 ground_station.update(hour_step, minute_step, second_step, nanosecond_step)
         step_count += 1
-
-
-def test():
-    import copy
-    class A:
-        def __init__(self, posn):
-            self.posn = posn
-
-        def get_posn(self):
-            return self.posn
-
-        def update_posn(self):
-            self.posn[0] += 1
-
-    class B:
-        def __init__(self, posn):
-            self.posn_b = posn
-            # self.posn_b = copy.deepcopy(posn)
-
-        def get_posn(self):
-            return self.posn_b
-
-    a = A([2, 2, 2])
-    posn = a.get_posn()
-    b = B(posn)
-    a.update_posn()
-    print(a.get_posn())
-    print(b.get_posn())
 
 
 if __name__ == "__main__":

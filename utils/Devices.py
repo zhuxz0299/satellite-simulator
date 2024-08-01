@@ -115,12 +115,11 @@ class Computer:
     # def set_compute_task_count(self, compute_task_count):
     #     self.compute_task_count = compute_task_count
 
-    # def get_compute_task_count(self):
-    #     return self.compute_task_count
+    def get_compute_task_count(self):
+        return self.scheduler.get_task_num()
 
     def update_task(self, total_step_in_sec): # 返回处理好的tile的个数，要传给后面的tx设备
         return self.scheduler.update_task(total_step_in_sec)
-        
 
     def assign_task(self): # 这里出现了内存泄漏问题，已解决
         self.scheduler.get_image(self.image_w, self.image_h)
@@ -167,6 +166,7 @@ class Computer_no_scheduler:
         self.device_list = [Device(config) for _ in range(self.N)]
         self.power_budget_threshold = config['power_budget_threshold'] # power_budget 变化量超过这个值时，需要重新分配功率 # TODO 参考了mobi-com的数据
         self.image_w, self.image_h = config['image_w'], config['image_h'] # TODO 卫星拍到的一张图片的大小，参考cote的数据
+        self.T_wait = config['T_wait']
 
     def _get_partition_size(self, W, H):
         min_m = min(device.get_memory() for device in self.device_list)
@@ -281,7 +281,8 @@ class Rx:
             return 2.5
         
 class Tx:
-    tx_duration_s = 0.044860 # TODO check this value
+    tx_duration_s = 0.0032 # TODO 处理后文件大小定为40KB(DynamicDet)，传输速率为100Mbps(参考starlink数据)
+    tx_image_duration_s = 0.36 # 图片大小为4096*3072，传输速率为100Mbps，假设是RGB图片
     state = 'OFF'
     prev_state = 'OFF'
     node_voltage = 0

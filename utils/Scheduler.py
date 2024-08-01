@@ -9,7 +9,7 @@ class Tiled_image:
         self.h = h
         # self.hard = random.choice([0, 1])  # whether the task is hard or not
         # self.c = 112.4 * w * h / (640 * 640) * random.uniform(0.3, 3)  # complexity of the task, the unit is Gflops
-        # self.c = (181.7 if self.hard else 112.4) * w * h / (640 * 640) # TODO 这里假定计算量是根据是否是hard task来决定的
+        # self.c = (181.7 if self.hard else 112.4) * w * h / (640 * 640) 
         self.c = complexity
         self.deadline = deadline
 
@@ -24,7 +24,7 @@ class Tiled_image:
 
 
 class Batch:
-    priority = 0  # priority of the batch
+    priority = 0  # priority of the batch 由于遵循先进先出，因此不需要优先级
     queue = []  # queue of tasks of the batch
     batch_complexity = 0  # total complexity of the tasks in the batch
 
@@ -55,22 +55,24 @@ class Device:
     power_headroom = 0  # power headroom of the device，定义为当前分配给设备的功率
 
     def __init__(self, config):
-        self.memory = eval(config['memory']) # TODO 之后还要考虑模型参数占用的显存
+        self.memory = eval(config['memory']) - eval(config['model_memory']) # 总显存减去模型占用的显存
         self.queue = [] # queue of tasks of the device，相当于硬盘，存放待处理的tile
         self.batches = [] # batch queue of the device，要考虑 budget 限制
         self.total_complexity = 0 # total complexity of the tasks in the queue
         self.resource = 0 # resource to be used by the device。resource 和 budget 这里假定为内存大小 # TODO 不过内存已经用memory限制过了，改成两次拍摄之间能够处理的任务量或许更合适一些
-        self.budget = self.memory # TODO budget 包括了内存和功率两个方面
+        self.budget = self.memory # TODO budget 指的是内存方面
         self.temperature = config['temperature']  # temperature of the device, the unit is K。 25 degree Celsius
         self.top_temperature = config['top_temperature']  # 80 degree Celsius
         self.compute_time_s = 0.0  # compute time of the device
-        self.power_per_tile = eval(config['power_per_tile'])  # power per tile of the device # TODO 这里用的是总功率除以core数量，可能不太合适
+        # self.power_per_tile = eval(config['power_per_tile'])  # power per tile of the device # 暂时先不考虑
+        self.max_power = config['max_power']  # maximum power of the device
         self.v_power_ratio = eval(config['v_power_ratio'])  # ratio of velocity and power # TODO 速度与功率的比值，这里假定是线性关系
         self.alpha, self.beta = config['alpha'], config['beta'] # TODO temperature control parameters
         # self.p_sun = config['P_sun']  # power of the sun when evaluate the temperature
 
     def _calc_batch_size(self, tile_size):
-        self.batchsize = min(math.floor(self.memory / tile_size), math.floor(self.power_headroom / self.power_per_tile))
+        # self.batchsize = min(math.floor(self.memory / tile_size), math.floor(self.power_headroom / self.power_per_tile))
+        self.batchsize = math.floor(self.memory / tile_size)
         if self.batchsize < 1: # 如果batchsize小于1，就设置为1，防止 group_tiles 函数出现死循环
             self.batchsize = 1
 
@@ -101,11 +103,8 @@ class Device:
         # if self.temperature > self.top_temperature: # 如果温度超过了阈值，就不再分配功率
         #     self.power_headroom = self.beta * (self.temperature - ambient_temperature) # 保持温度不变
         # else:
-        self.power_headroom = power_headroom
+        self.power_headroom = min(power_headroom, self.max_power)
         self.v = self.v_power_ratio * self.power_headroom # 速度与功率成正比
-
-    # def set_budget(self, budget): # 不同位置会有不同的 budget
-    #     self.budget = budget
 
     def add_tile(self, tile): # 向硬盘中添加tile
         self.queue.append(tile)
@@ -123,7 +122,7 @@ class Device:
     
     def calc_temperature(self, delta_t):
         ambient_temperature = 2.73 # 2.73K
-        self.temperature += self.alpha * (self.power_headroom - self.beta * (self.temperature - ambient_temperature)) * delta_t # 拟合的时候delta_t的单位是min
+        self.temperature += self.alpha * (self.power_headroom - self.beta * (self.temperature**4 - ambient_temperature**4)) * delta_t # 拟合的时候delta_t的单位是min
         return self.temperature
     
     def process_image(self, total_step_in_sec): # 返回处理好的tile的个数，要传给后面的tx设备
@@ -132,20 +131,22 @@ class Device:
                 return 0
             self.group_tiles() # 加入新的任务
         self.compute_time_s += total_step_in_sec
-        while self.compute_time_s >= self.batches[0].get_complexity() / self.v:
+        tile_num = 0
+        while self.batches and self.compute_time_s >= self.batches[0].get_complexity() / self.v:
             self.compute_time_s -= self.batches[0].get_complexity() / self.v
             self.resource -= self.batches[0].get_size()
-            tile_num = self.batches[0].get_tile_num()
+            tile_num += self.batches[0].get_tile_num()
             self.batches.pop(0)
-            return tile_num
-        else:
-            return 0
+        return tile_num
 
     def get_power(self):
         if not self.batches and not self.queue: # 没有任务
             return 0
         else: # 有任务，返回分配给设备的功率
-            return self.power_headroom 
+            return self.power_headroom
+        
+    def get_batch_num(self):
+        return len(self.batches)
 
         
 class Scheduler:
@@ -159,12 +160,14 @@ class Scheduler:
         self.T_wait = config['T_wait']  # maximum tolerable waiting time # TODO 参考了cote的数据，1.8s 为拍摄间隔
 
     def _get_partition_size(self, W, H):
-        min_m = min(device.get_memory() for device in self.device_list)
-        max_v = max(device.v for device in self.device_list)
-        limit = min(min_m, max_v * self.T_wait * 640 * 640 / 112.4) # TODO 640*640 的一张图片，计算量为 112.4Gflops
-        partition = max(math.ceil(math.sqrt(W * H / limit)), 1) # TODO 之前是min，感觉是不小心写错了
-        w = math.ceil(W / partition)
-        h = math.ceil(H / partition)
+        # min_m = min(device.get_memory() for device in self.device_list)
+        # max_v = max(device.v for device in self.device_list)
+        # limit = min(min_m, max_v * self.T_wait * 640 * 640 / 112.4) # 640*640 的一张图片，计算量为 112.4Gflops
+        # partition = max(math.ceil(math.sqrt(W * H / limit)), 1) # 之前是min，感觉是不小心写错了
+        # w = math.ceil(W / partition)
+        # h = math.ceil(H / partition)
+        w, h = 400, 400 # TODO 参考了Resource-efficient In-orbit Detection of Earth Objects的数据，400*400 为一块tile
+        partition = math.ceil(W / w) * math.ceil(H / h)
         return partition, w, h
 
     def _assign_tiles(self, tile_list): # assign tiles to devices, if the tiles cannot be assigned, return False
@@ -176,14 +179,15 @@ class Scheduler:
             device.add_tile(tile)
             heapq.heappush(device_heap, (device.get_processing_time(), device))
         for device in self.device_list:
+            # print("DEBUG: deive queue size: ", len(device.queue))
             device.group_tiles()
 
     def get_image(self, W, H):
         partition, w, h = self._get_partition_size(W, H)
         hard = random.choice([0, 1])
-        complexity = (181.7 if hard else 112.4) * w * h / (640 * 640)
-        tile_list = [Tiled_image(w, h, complexity, 0)] * partition * partition
-        # print("tile_list size: ", len(tile_list))
+        # complexity = (181.7 if hard else 112.4) * w * h / (640 * 640)
+        complexity = 3.46 * w * h / (640 * 640) / 50
+        tile_list = [Tiled_image(w, h, complexity, 0)] * partition
         self._assign_tiles(tile_list)
 
     def power_allocation(self, available_power):
@@ -217,6 +221,9 @@ class Scheduler:
             device.total_complexity = 0
             device.resource = 0
             device.compute_time_s = 0.0
+        
+    def get_task_num(self):
+        return sum(device.get_batch_num() for device in self.device_list)
 
 
 if __name__ == "__main__":

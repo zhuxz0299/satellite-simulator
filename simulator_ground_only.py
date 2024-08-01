@@ -7,7 +7,7 @@ sys.path.append(utils_dir)
 
 from utils import constant as const
 from utils import utilities
-from utils.Devices import Camera, Computer, Rx, Tx
+from utils.Devices import Camera, Rx, Tx
 from utils.Capacitor import Capacitor
 from utils.SolarArray import SolarArray
 from utils.DateTime import DateTime
@@ -41,7 +41,7 @@ satid_to_occlusion_factor = dict()
 satid_to_solar_array = dict()
 satid_to_capacitor = dict()
 satid_to_camera = dict()
-satid_to_computer = dict()
+
 satid_to_rx = dict()
 satid_to_tx = dict()
 satid_to_node_voltage = dict()
@@ -50,7 +50,7 @@ satid_to_thresh_coeff = dict()
 satid_to_threshold_km = dict()
 ground_station_list = []
 gndid_to_gnd = dict()
-computer_config = dict()
+
 
 
 def get_conf_files(config_path):
@@ -82,7 +82,7 @@ def get_conf_files(config_path):
 
 
 def read_data_from_config():
-    global num_step, hour_step, minute_step, second_step, nanosecond_step, total_step_in_sec, date_time, satellite_list, satid_to_sat, satid_to_occlusion_factor, satid_to_solar_array, satid_to_capacitor, satid_to_node_voltage, satid_to_camera, satid_to_computer, satid_to_rx, satid_to_tx, satid_to_sensor, satid_to_thresh_coeff, satid_to_threshold_km, ground_station_list, gndid_to_gnd, computer_config
+    global num_step, hour_step, minute_step, second_step, nanosecond_step, total_step_in_sec, date_time, satellite_list, satid_to_sat, satid_to_occlusion_factor, satid_to_solar_array, satid_to_capacitor, satid_to_node_voltage, satid_to_camera, satid_to_rx, satid_to_tx, satid_to_sensor, satid_to_thresh_coeff, satid_to_threshold_km, ground_station_list, gndid_to_gnd
     # DONE read num-step.dat, to get the number of steps
     with open(num_step_file, 'r') as num_step_handle:
         next(num_step_handle)
@@ -164,13 +164,11 @@ def read_data_from_config():
         satid_to_capacitor[id] = Capacitor(capacitance_farad, esr_ohm, id)
         satid_to_capacitor[id].set_charge_coulomb(charge_coulomb)
 
-    # DONE set the parameters of camera, computer, etc.
-    with open("computer.yaml", 'r') as computer_handle:
-        computer_config = yaml.safe_load(computer_handle)
+    # DONE set the parameters of camera, etc.
     for satellite in satellite_list:
         sat_id = satellite.get_id()
         satid_to_camera[sat_id] = Camera()
-        satid_to_computer[sat_id] = Computer(computer_config)
+
         satid_to_rx[sat_id] = Rx()
         satid_to_tx[sat_id] = Tx()
 
@@ -178,23 +176,8 @@ def read_data_from_config():
     for satellite in satellite_list:
         sat_id = satellite.get_id()
 
-        # 这里是为了得到computer模块最多能够消耗的功率，作为一个上限
-        power_w = utilities.calc_max_power_w(
-            satid_to_capacitor[sat_id].get_charge_coulomb(),
-            satid_to_capacitor[sat_id].get_capacitance_farad(),
-            satid_to_solar_array[sat_id].get_current_ampere(),
-            satid_to_capacitor[sat_id].get_esr_ohm(),
-        )
+        power_w = satid_to_camera[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()
 
-        if (power_w < satid_to_camera[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()):
-            satid_to_camera[sat_id].set_state('OFF')
-            satid_to_computer[sat_id].set_state('OFF')
-            satid_to_rx[sat_id].set_state('OFF')
-            satid_to_tx[sat_id].set_state('OFF')
-            
-        satid_to_computer[sat_id].set_power_budget(power_w - satid_to_camera[sat_id].get_power() - satid_to_rx[sat_id].get_power() - satid_to_tx[sat_id].get_power())
-
-        # power_w = satid_to_camera[sat_id].get_power() + satid_to_computer[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()
         node_voltage_discriminant = utilities.calc_node_voltage_discriminant(
             satid_to_capacitor[sat_id].get_charge_coulomb(),
             satid_to_capacitor[sat_id].get_capacitance_farad(),
@@ -203,19 +186,19 @@ def read_data_from_config():
             power_w
         )
 
-        # if (node_voltage_discriminant < 0):
-        #     satid_to_camera[sat_id].set_state('OFF')
-        #     satid_to_computer[sat_id].set_state('OFF')
-        #     satid_to_rx[sat_id].set_state('OFF')
-        #     satid_to_tx[sat_id].set_state('OFF')
-        #     power_w = satid_to_camera[sat_id].get_power() + satid_to_computer[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()
-        #     node_voltage_discriminant = utilities.calc_node_voltage_discriminant(
-        #         satid_to_capacitor[sat_id].get_charge_coulomb(),
-        #         satid_to_capacitor[sat_id].get_capacitance_farad(),
-        #         satid_to_solar_array[sat_id].get_current_ampere(),
-        #         satid_to_capacitor[sat_id].get_esr_ohm(),
-        #         power_w
-        #     )
+        if (node_voltage_discriminant < 0):
+            satid_to_camera[sat_id].set_state('OFF')
+            satid_to_rx[sat_id].set_state('OFF')
+            satid_to_tx[sat_id].set_state('OFF')
+            power_w = satid_to_camera[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()
+            node_voltage_discriminant = utilities.calc_node_voltage_discriminant(
+                satid_to_capacitor[sat_id].get_charge_coulomb(),
+                satid_to_capacitor[sat_id].get_capacitance_farad(),
+                satid_to_solar_array[sat_id].get_current_ampere(),
+                satid_to_capacitor[sat_id].get_esr_ohm(),
+                power_w
+            )
+
         node_voltage = utilities.calc_node_voltage(
             node_voltage_discriminant,
             satid_to_capacitor[sat_id].get_charge_coulomb(),
@@ -224,7 +207,6 @@ def read_data_from_config():
             satid_to_capacitor[sat_id].get_esr_ohm()
         )
         satid_to_camera[sat_id].set_node_voltage(node_voltage)
-        satid_to_computer[sat_id].set_node_voltage(node_voltage)
         satid_to_rx[sat_id].set_node_voltage(node_voltage)
         satid_to_tx[sat_id].set_node_voltage(node_voltage)
         satid_to_node_voltage[sat_id] = node_voltage
@@ -269,18 +251,12 @@ def log_file_init(log_path):
         sensor_trigger_file = os.path.join(log_path, f"{sat_id}-sensor-trigger.csv")
         with open(sensor_trigger_file, 'w') as sensor_trigger_handle:
             sensor_trigger_handle.write("date_time, altidute_km, x_km, y_km, z_km\n")
-        # node_voltage_file = os.path.join(log_path, f"{sat_id}-node-voltage.csv")
-        # with open(node_voltage_file, 'w') as node_voltage_handle:
-        #     node_voltage_handle.write("date_time, node_voltage\n")
         device_state_file = os.path.join(log_path, f"{sat_id}-device-state.csv")
         with open(device_state_file, 'w') as device_state_handle:
-            device_state_handle.write("date_time, camera_state, computer_state, rx_state, tx_state\n")
+            device_state_handle.write("date_time, camera_state, rx_state, tx_state\n")
         communication_file = os.path.join(log_path, f"{sat_id}-communication.csv")
         with open(communication_file, 'w') as communication_handle:
             communication_handle.write("date_time, gnd_id\n")
-        energy_system_file = os.path.join(log_path, f"{sat_id}-energy-system.csv")
-        with open(energy_system_file, 'w') as energy_system_handle:
-            energy_system_handle.write("date_time, node_voltage, computer_power, total_load_current_ampere, solar_array_ampere, capacitor_charge_coulomb\n")
     
 
 def main():
@@ -297,10 +273,9 @@ def main():
     read_data_from_config()
     log_file_init(log_path)
 
+    # --------------------- simulation loop --------------------- #
     step_count = 0
-    sensor_image_num, trans_tile_num = 0, 0 # 记录sensor触发的次数和transmit的tile数
     while step_count < num_step: 
-        # --------------------- simulation loop --------------------- #
         jd = utilities.calc_julian_day_from_ymd(date_time.get_year(), date_time.get_month(), date_time.get_day())
         sec = utilities.calc_sec_since_midnight(date_time.get_hour(), date_time.get_minute(), date_time.get_second())
         ns = date_time.get_nanosecond()
@@ -320,16 +295,11 @@ def main():
 
             ##################################### capacitor charge calculation #####################################
             capacitor_charge_coulomb = satid_to_capacitor[sat_id].get_charge_coulomb()
-            total_load_current_ampere = (satid_to_camera[sat_id].get_power() + satid_to_computer[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()) / satid_to_node_voltage[sat_id]
+            total_load_current_ampere = (satid_to_camera[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()) / satid_to_node_voltage[sat_id]
             capacitor_charge_coulomb += (satid_to_solar_array[sat_id].get_current_ampere() - total_load_current_ampere) * total_step_in_sec
             if capacitor_charge_coulomb < 0:
                 capacitor_charge_coulomb = 0
             satid_to_capacitor[sat_id].set_charge_coulomb(capacitor_charge_coulomb)
-
-            if step_count % 1000 == 0:
-                energy_system_file = os.path.join(log_path, f"{sat_id}-energy-system.csv")
-                with open(energy_system_file, 'a') as energy_system_handle:
-                    energy_system_handle.write(f"{satellite.get_local_time()}, {satid_to_node_voltage[sat_id]}, {satid_to_computer[sat_id].get_power()}, {total_load_current_ampere}, {satid_to_solar_array[sat_id].get_current_ampere()}, {satid_to_capacitor[sat_id].get_charge_coulomb()}\n")
             
             ##################################### simulate the camera #####################################
             if satid_to_camera[sat_id].get_state() == 'IMAGING':
@@ -346,45 +316,21 @@ def main():
                 satid_to_camera[sat_id].set_readout_task_count(readout_task_count)
                 if image_task_count == 0:
                     satid_to_camera[sat_id].set_state('READOUT')
-            elif satid_to_camera[sat_id].get_state() == 'READOUT':
+            elif satid_to_camera[sat_id].get_state() == 'READOUT': # 没有computer的情况下，直接读取给tx
                 readout_time_s = satid_to_camera[sat_id].get_readout_time_s()
                 readout_task_count = satid_to_camera[sat_id].get_readout_task_count()
+                tx_task_count = satid_to_tx[sat_id].get_tx_task_count()
                 # compute_task_count = satid_to_computer[sat_id].get_compute_task_count()
                 readout_duration_s = satid_to_camera[sat_id].readout_duration_s
                 while readout_time_s > readout_duration_s and readout_task_count > 0:
                     readout_time_s -= readout_duration_s
                     readout_task_count -= 1
-                    satid_to_computer[sat_id].assign_task() # 自动给computer分配一个任务
-                    # satid_to_computer[sat_id].allocate_power() # 同时在有新的任务时，重新分配一下功率
-                    satid_to_computer[sat_id].set_state('WORK') # 应该是合理的，能量不足时所有设备都会关机；这里相机在工作，所以能量应该够用。
+                    tx_task_count += 1
                 satid_to_camera[sat_id].set_readout_time_s(readout_time_s)
                 satid_to_camera[sat_id].set_readout_task_count(readout_task_count)
-                # satid_to_computer[sat_id].set_compute_task_count(compute_task_count)
+                satid_to_tx[sat_id].set_tx_task_count(tx_task_count)
                 if readout_task_count == 0:
                     satid_to_camera[sat_id].set_state('OFF')
-
-            # if satid_to_computer[sat_id].get_state() == 'WORK':
-            #     compute_time_s = satid_to_computer[sat_id].get_compute_time_s()
-            #     compute_task_count = satid_to_computer[sat_id].get_compute_task_count()
-            #     tx_task_count = satid_to_tx[sat_id].get_tx_task_count()
-            #     task_duration_s = satid_to_computer[sat_id].task_duration_s
-            #     while compute_time_s > task_duration_s and compute_task_count > 0:
-            #         compute_time_s -= task_duration_s
-            #         compute_task_count -= 1
-            #         tx_task_count += 1
-            #     satid_to_computer[sat_id].set_compute_time_s(compute_time_s)
-            #     satid_to_computer[sat_id].set_compute_task_count(compute_task_count)
-            #     satid_to_tx[sat_id].set_tx_task_count(tx_task_count)
-            #     if compute_task_count == 0:
-            #         satid_to_computer[sat_id].set_state('OFF')
-
-            ##################################### simulate the computer #####################################
-            if satid_to_computer[sat_id].get_state() == 'WORK':
-                tile_num = satid_to_computer[sat_id].update_task(total_step_in_sec)
-                tx_task_count = satid_to_tx[sat_id].get_tx_task_count()
-                satid_to_tx[sat_id].set_tx_task_count(tx_task_count + tile_num)
-                if satid_to_computer[sat_id].get_power() == 0: # 在开机状态下，如果没有任务，就会自动关机
-                    satid_to_computer[sat_id].set_state('OFF')
 
             ##################################### simulate satellite sensor #####################################
             prev_sense_posn = satid_to_sensor[sat_id].get_prev_sense_posn()
@@ -407,36 +353,23 @@ def main():
                 satid_to_camera[sat_id].set_state('IMAGING')
                 satid_to_threshold_km[sat_id] = satid_to_thresh_coeff[sat_id] * sat_alt_km
                 satid_to_sensor[sat_id].update() # update the prev sense position and time
-                sensor_image_num += 1
                 # log the data
                 sensor_trigger_file = os.path.join(log_path, f"{sat_id}-sensor-trigger.csv")
                 with open(sensor_trigger_file, 'a') as sensor_trigger_handle:
                     sensor_trigger_handle.write(f"{satellite.get_local_time()}, ")
                     sensor_trigger_handle.write(f"{sat_alt_km}, {sat_eci_posn_km[0]}, {sat_eci_posn_km[1]}, {sat_eci_posn_km[2]}\n")
 
-            ##################################### communication system #####################################
+            ##################################### simulate the satellite communication system #####################################
             if satellite.get_gnd_id_com() is not None: # if the satellite is communicating with a ground station
                 gnd_id = satellite.get_gnd_id_com()
                 ground_station = gndid_to_gnd[gnd_id]
                 gnd_lat = ground_station.get_lat()
                 gnd_lon = ground_station.get_lon()
                 gnd_hae = ground_station.get_hae()
-                # 如果卫星在通信范围内，且通信系统是关闭的，且有任务需要发送，则打开通信系统
-                if satid_to_tx[sat_id].get_state() == 'OFF' and satid_to_tx[sat_id].get_tx_task_count() > 0 and satid_to_capacitor[sat_id].get_charge_coulomb() > 35: 
-                    satid_to_tx[sat_id].set_state('TX')
-                # if the satellite is not in the communication range, then turn off the communication system
                 if utilities.calc_elevation_deg(jd, sec, ns, gnd_lat, gnd_lon, gnd_hae, sat_eci_posn_km) <= 10:
                     satellite.set_gnd_id_com(None)
                     satid_to_tx[sat_id].set_state('OFF')
                     satid_to_rx[sat_id].set_state('OFF')
-                    satid_to_computer[sat_id].clear_buffer() # TODO 在经过了通信之后，清空所有任务，即将通信作为一次deadline
-                    satid_to_tx[sat_id].set_tx_task_count(0) 
-                    satid_to_camera[sat_id].set_image_task_count(0)
-                    satid_to_camera[sat_id].set_readout_task_count(0)
-                    # log
-                    communication_file = os.path.join(log_path, f"{sat_id}-communication.csv")
-                    with open(communication_file, 'a') as communication_handle:
-                        communication_handle.write(f"{satellite.get_local_time()}, {gnd_id} (end), sensor_image_num = {sensor_image_num}, trans_tile_num = {trans_tile_num} \n")
             if satellite.get_gnd_id_com() is None: # if the satellite is not communicating with a ground station
                 for ground_station in ground_station_list:
                     gnd_lat = ground_station.get_lat()
@@ -461,7 +394,6 @@ def main():
                 while tx_time_s > tx_duration_s and tx_task_count > 0:
                     tx_time_s -= tx_duration_s
                     tx_task_count -= 1
-                    trans_tile_num += 1
                 satid_to_tx[sat_id].set_tx_time_s(tx_time_s)
                 satid_to_tx[sat_id].set_tx_task_count(tx_task_count)
                 if tx_task_count == 0:
@@ -474,24 +406,15 @@ def main():
                     satid_to_rx[sat_id].set_state('OFF')
                 satid_to_rx[sat_id].set_rx_time_s(rx_time_s)
 
-            ##################################### log the data #####################################
-            # node_voltage_file = os.path.join(log_path, f"{sat_id}-node-voltage.csv")
-            # with open(node_voltage_file, 'a') as node_voltage_handle:
-            #     node_voltage_handle.write(f"{satellite.get_local_time()}, {satid_to_node_voltage[sat_id]}\n")
-            if (satid_to_camera[sat_id].get_state() != satid_to_camera[sat_id].get_prev_state()) or (satid_to_computer[sat_id].get_state() != satid_to_computer[sat_id].get_prev_state()) or (satid_to_rx[sat_id].get_state() != satid_to_rx[sat_id].get_prev_state()) or (satid_to_tx[sat_id].get_state() != satid_to_tx[sat_id].get_prev_state()):
+            # log the data
+            if (satid_to_camera[sat_id].get_state() != satid_to_camera[sat_id].get_prev_state()) or (satid_to_rx[sat_id].get_state() != satid_to_rx[sat_id].get_prev_state()) or (satid_to_tx[sat_id].get_state() != satid_to_tx[sat_id].get_prev_state()):
                 device_state_file = os.path.join(log_path, f"{sat_id}-device-state.csv")
                 with open(device_state_file, 'a') as device_state_handle:
                     device_state_handle.write(f"{satellite.get_local_time()}, ")
-                    device_state_handle.write(f"{satid_to_camera[sat_id].get_state()}, {satid_to_computer[sat_id].get_state()}, {satid_to_rx[sat_id].get_state()}, {satid_to_tx[sat_id].get_state()}\n")
-                    image_task_count = satid_to_camera[sat_id].get_image_task_count()
-                    readout_task_count = satid_to_camera[sat_id].get_readout_task_count()
-                    compute_task_count = satid_to_computer[sat_id].get_compute_task_count()
-                    tx_task_count = satid_to_tx[sat_id].get_tx_task_count()
-                    device_state_handle.write(f"\t{image_task_count}, {readout_task_count}, {compute_task_count}, {tx_task_count}\n")
+                    device_state_handle.write(f"{satid_to_camera[sat_id].get_state()}, {satid_to_rx[sat_id].get_state()}, {satid_to_tx[sat_id].get_state()}\n")
 
             
-            
-        # --------------------- update simulation to the next step --------------------- #
+        # update simulation to the next step
         date_time.update(hour_step, minute_step, second_step, nanosecond_step)
         
         for satellite in satellite_list:
@@ -501,21 +424,16 @@ def main():
 
             ##################################### record the previous state #####################################
             satid_to_camera[sat_id].set_prev_state(satid_to_camera[sat_id].get_state())
-            satid_to_computer[sat_id].set_prev_state(satid_to_computer[sat_id].get_state())
             satid_to_rx[sat_id].set_prev_state(satid_to_rx[sat_id].get_state())
             satid_to_tx[sat_id].set_prev_state(satid_to_tx[sat_id].get_state())
 
-            ##################################### update the time of the devices #####################################
             if satid_to_camera[sat_id].get_state() == 'IMAGING':
                 image_time_s = satid_to_camera[sat_id].get_image_time_s()
                 satid_to_camera[sat_id].set_image_time_s(image_time_s + total_step_in_sec)
             elif satid_to_camera[sat_id].get_state() == 'READOUT':
                 readout_time_s = satid_to_camera[sat_id].get_readout_time_s()
                 satid_to_camera[sat_id].set_readout_time_s(readout_time_s + total_step_in_sec)
-            # computer 的部分在上面已经更新了，包括增加compute_time_s的部分
-            # if satid_to_computer[sat_id].get_state() == 'WORK':
-            #     compute_time_s = satid_to_computer[sat_id].get_compute_time_s()
-            #     satid_to_computer[sat_id].set_compute_time_s(compute_time_s + total_step_in_sec)
+            
             if satid_to_tx[sat_id].get_state() == 'TX':
                 tx_time_s = satid_to_tx[sat_id].get_tx_time_s()
                 satid_to_tx[sat_id].set_tx_time_s(tx_time_s + total_step_in_sec)
@@ -523,35 +441,12 @@ def main():
                 rx_time_s = satid_to_rx[sat_id].get_rx_time_s()
                 satid_to_rx[sat_id].set_rx_time_s(rx_time_s + total_step_in_sec)
 
-            ##################################### update the position of the sensor #####################################
             satid_to_sensor[sat_id].set_eci_posn(sat_eci_posn_km)
 
-            ##################################### update the power of the satellite #####################################
-            power_w = utilities.calc_max_power_w(
-                satid_to_capacitor[sat_id].get_charge_coulomb(),
-                satid_to_capacitor[sat_id].get_capacitance_farad(),
-                satid_to_solar_array[sat_id].get_current_ampere(),
-                satid_to_capacitor[sat_id].get_esr_ohm(),
-            )
-            # power_w = \
-            #     satid_to_camera[sat_id].get_power() + satid_to_computer[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()
-            if (power_w < satid_to_camera[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()):
-                satid_to_camera[sat_id].set_state('OFF')
-                satid_to_computer[sat_id].set_state('OFF')
-                satid_to_rx[sat_id].set_state('OFF')
-                satid_to_tx[sat_id].set_state('OFF')
 
-            # 电量较低时限制设备的使用，防止因为正反馈导致电量耗尽
-            if satid_to_capacitor[sat_id].get_charge_coulomb() < 35:
-                satid_to_computer[sat_id].set_state('OFF')
-                satid_to_tx[sat_id].set_state('OFF')
-            if satid_to_capacitor[sat_id].get_charge_coulomb() < 25:
-                satid_to_camera[sat_id].set_state('OFF')
-
-            # 更新budget
-            computer_power_budget = power_w - satid_to_camera[sat_id].get_power() - satid_to_rx[sat_id].get_power() - satid_to_tx[sat_id].get_power()
-            satid_to_computer[sat_id].set_power_budget(computer_power_budget)
+            power_w = satid_to_camera[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()
             
+            # 保留 cote 中的处理方法，因为这里不需要考虑计算机功率的问题，相对比较稳定
             node_voltage_discriminant = utilities.calc_node_voltage_discriminant(
                 satid_to_capacitor[sat_id].get_charge_coulomb(),
                 satid_to_capacitor[sat_id].get_capacitance_farad(),
@@ -560,20 +455,19 @@ def main():
                 power_w
             )
 
-            # if (node_voltage_discriminant < 0):
-            #     satid_to_camera[sat_id].set_state('OFF')
-            #     satid_to_computer[sat_id].set_state('OFF')
-            #     satid_to_rx[sat_id].set_state('OFF')
-            #     satid_to_tx[sat_id].set_state('OFF')
-            #     power_w = \
-            #         satid_to_camera[sat_id].get_power() + satid_to_computer[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()
-            #     node_voltage_discriminant = utilities.calc_node_voltage_discriminant(
-            #         satid_to_capacitor[sat_id].get_charge_coulomb(),
-            #         satid_to_capacitor[sat_id].get_capacitance_farad(),
-            #         satid_to_solar_array[sat_id].get_current_ampere(),
-            #         satid_to_capacitor[sat_id].get_esr_ohm(),
-            #         power_w
-            #     )
+            if (node_voltage_discriminant < 0):
+                satid_to_camera[sat_id].set_state('OFF')
+                satid_to_rx[sat_id].set_state('OFF')
+                satid_to_tx[sat_id].set_state('OFF')
+                power_w = \
+                    satid_to_camera[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()
+                node_voltage_discriminant = utilities.calc_node_voltage_discriminant(
+                    satid_to_capacitor[sat_id].get_charge_coulomb(),
+                    satid_to_capacitor[sat_id].get_capacitance_farad(),
+                    satid_to_solar_array[sat_id].get_current_ampere(),
+                    satid_to_capacitor[sat_id].get_esr_ohm(),
+                    power_w
+                )
 
             node_voltage = utilities.calc_node_voltage(
                 node_voltage_discriminant,
@@ -582,24 +476,16 @@ def main():
                 satid_to_solar_array[sat_id].get_current_ampere(),
                 satid_to_capacitor[sat_id].get_esr_ohm(),
             )
+
             satid_to_camera[sat_id].set_node_voltage(node_voltage)
-            satid_to_computer[sat_id].set_node_voltage(node_voltage)
             satid_to_rx[sat_id].set_node_voltage(node_voltage)
             satid_to_tx[sat_id].set_node_voltage(node_voltage)
             satid_to_node_voltage[sat_id] = node_voltage
 
-            ##################################### update the ground stations #####################################
+
             for ground_station in ground_station_list:
                 ground_station.update(hour_step, minute_step, second_step, nanosecond_step)
         step_count += 1
-
-
-def test():
-    with open("computer.yaml", 'r') as computer_handle:
-        computer_config = yaml.safe_load(computer_handle)
-    beta = computer_config['beta']
-    beta = beta * 2
-    print(beta)
 
 
 if __name__ == "__main__":

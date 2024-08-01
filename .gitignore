@@ -2,3 +2,4 @@ log/
 __pycache__/
 test.ipynb
 log*/
+backup/

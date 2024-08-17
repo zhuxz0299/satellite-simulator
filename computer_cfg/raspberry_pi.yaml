@@ -1,0 +1,9 @@
+memory: 4e9/12 # 4GB，一个pixel 12 bytes
+model_memory: 3e8/12 # 300MB
+temperature: 298 # 25 degree
+top_temperature: 323 # 50 degree
+bottom_temperature: 273 # 0 degree 
+max_power: 7.9 # 7.9W，Raspberry Pi 4
+v_power_ratio: 9.92/7.9 # 9.92GFLOPS/7.9W
+alpha: 2.285 # temperature coefficient
+beta: 2.8797e-10 # temperature coefficient

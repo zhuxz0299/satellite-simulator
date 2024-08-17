@@ -1,0 +1,6 @@
+N: 2 # number of devices
+power_budget_threshold: 1 # 1W
+image_w: 4096
+image_h: 3072 
+T_wait: 1.8 # 1.8s
+cfg_path: [computer_cfg/jetson_nano.yaml, computer_cfg/raspberry_pi.yaml]

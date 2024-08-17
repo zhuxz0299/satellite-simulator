@@ -1,0 +1,9 @@
+memory: 4e9/12 # 4GB，一个pixel 12 bytes
+model_memory: 3e8/12 # 300MB
+temperature: 298 # 25 degree
+top_temperature: 353 # 80 degree
+bottom_temperature: 248
+max_power: 10 # 10W，NVIDIA Jetson Nano
+v_power_ratio: 472/10 # 472GFLOPS/10W
+alpha: 2.285 # temperature coefficient
+beta: 2.8797e-10 # temperature coefficient

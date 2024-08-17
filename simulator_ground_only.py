@@ -271,10 +271,14 @@ def main():
 
     get_conf_files(config_path)
     read_data_from_config()
+    global satellite_list
+    first_sat = satellite_list[0] # TODO 测试仅有一个卫星的情况
+    satellite_list = [first_sat]
     log_file_init(log_path)
 
     # --------------------- simulation loop --------------------- #
     step_count = 0
+    sensor_image_num, trans_tile_num = 0, 0 # 记录sensor触发的次数和transmit的tile数
     while step_count < num_step: 
         jd = utilities.calc_julian_day_from_ymd(date_time.get_year(), date_time.get_month(), date_time.get_day())
         sec = utilities.calc_sec_since_midnight(date_time.get_hour(), date_time.get_minute(), date_time.get_second())
@@ -353,6 +357,7 @@ def main():
                 satid_to_camera[sat_id].set_state('IMAGING')
                 satid_to_threshold_km[sat_id] = satid_to_thresh_coeff[sat_id] * sat_alt_km
                 satid_to_sensor[sat_id].update() # update the prev sense position and time
+                sensor_image_num += 1
                 # log the data
                 sensor_trigger_file = os.path.join(log_path, f"{sat_id}-sensor-trigger.csv")
                 with open(sensor_trigger_file, 'a') as sensor_trigger_handle:
@@ -370,6 +375,13 @@ def main():
                     satellite.set_gnd_id_com(None)
                     satid_to_tx[sat_id].set_state('OFF')
                     satid_to_rx[sat_id].set_state('OFF')
+                    satid_to_tx[sat_id].set_tx_task_count(0)
+                    satid_to_camera[sat_id].set_image_task_count(0)
+                    satid_to_camera[sat_id].set_readout_task_count(0)
+                    # log
+                    communication_file = os.path.join(log_path, f"{sat_id}-communication.csv")
+                    with open(communication_file, 'a') as communication_handle:
+                        communication_handle.write(f"{satellite.get_local_time()}, {gnd_id} (end), sensor_image_num = {sensor_image_num}, trans_tile_num = {trans_tile_num} \n")
             if satellite.get_gnd_id_com() is None: # if the satellite is not communicating with a ground station
                 for ground_station in ground_station_list:
                     gnd_lat = ground_station.get_lat()
@@ -381,7 +393,7 @@ def main():
                         # log 
                         communication_file = os.path.join(log_path, f"{sat_id}-communication.csv")
                         with open(communication_file, 'a') as communication_handle:
-                            communication_handle.write(f"{satellite.get_local_time()}, {gnd_id}\n")
+                            communication_handle.write(f"{satellite.get_local_time()}, {gnd_id}, sensor_image_num = {sensor_image_num}, trans_tile_num = {trans_tile_num}, \n")
                         satid_to_tx[sat_id].set_state('TX')
                         satid_to_rx[sat_id].set_state('RX')
                         satid_to_rx[sat_id].set_rx_time_s(-sat_alt_km / const.SPEED_OF_LIGHT_KM_S)  # consider the time delay
@@ -390,10 +402,11 @@ def main():
             if satid_to_tx[sat_id].get_state() == 'TX':
                 tx_time_s = satid_to_tx[sat_id].get_tx_time_s()
                 tx_task_count = satid_to_tx[sat_id].get_tx_task_count()
-                tx_duration_s = satid_to_tx[sat_id].tx_duration_s
+                tx_duration_s = satid_to_tx[sat_id].tx_image_duration_s
                 while tx_time_s > tx_duration_s and tx_task_count > 0:
                     tx_time_s -= tx_duration_s
                     tx_task_count -= 1
+                    trans_tile_num += 1
                 satid_to_tx[sat_id].set_tx_time_s(tx_time_s)
                 satid_to_tx[sat_id].set_tx_task_count(tx_task_count)
                 if tx_task_count == 0:

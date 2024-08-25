@@ -187,6 +187,17 @@ class Scheduler:
             # print("DEBUG: deive queue size: ", len(device.queue))
             device.group_tiles()
 
+    def _assign_tiles_no_scheduling(self, tile_list):
+        tile_num, cnt = len(tile_list), 0
+        while cnt < tile_num:
+            for device in self.device_list:
+                if cnt >= tile_num:
+                    break
+                device.add_tile(tile_list[cnt])
+                cnt += 1
+        for device in self.device_list:
+            device.group_tiles()
+
     def get_image(self, W, H):
         partition, w, h = self._get_partition_size(W, H)
         hard = random.choice([0, 1])
@@ -195,12 +206,27 @@ class Scheduler:
         tile_list = [Tiled_image(w, h, complexity, 0)] * partition
         self._assign_tiles(tile_list)
 
+    def get_image_no_scheduling(self, W, H):
+        partition, w, h = 1, W, H
+        hard = random.choice([0, 1])
+        # complexity = (181.7 if hard else 112.4) * w * h / (640 * 640)
+        complexity = 3.46 * w * h / (640 * 640)
+        tile_list = [Tiled_image(w, h, complexity, 0)] * partition
+        self._assign_tiles_no_scheduling(tile_list)
+
     def update_task(self, total_step_in_sec): # update the task of the devices，return the number of tiles processed
         tile_num = 0
         for device in self.device_list:
             device.downclock() # 如果温度过高，就降频
             tile_num += device.process_image(total_step_in_sec)
             device.calc_temperature(total_step_in_sec / 60) # delta_t 的单位是min
+        return tile_num
+    
+    def update_task_no_runtime(self, total_step_in_sec):
+        tile_num = 0
+        for device in self.device_list:
+            tile_num += device.process_image(total_step_in_sec)
+            device.calc_temperature(total_step_in_sec / 60)
         return tile_num
     
     def get_task_num(self):
@@ -219,6 +245,10 @@ class Scheduler:
             power_allocations = new_power_allocations
         for i in range(self.N):
             self.device_list[i].set_power_headroom(power_allocations[i])
+
+    def power_allocation_no_runtime(self, available_power):
+        for device in self.device_list:
+            device.set_power_headroom(available_power / self.N)
 
     def get_power(self): # get the total power of the devices
         return sum(device.get_power() for device in self.device_list)

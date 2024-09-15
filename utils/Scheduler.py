@@ -117,7 +117,7 @@ class Device:
 
     def power_sensitivity(self, P):
         # return np.power(P, -0.5)
-        return 1
+        return self.v_power_ratio
 
     def get_power(self):
         if not self.batches and not self.queue: # 没有任务

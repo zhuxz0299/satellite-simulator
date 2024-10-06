@@ -1,5 +1,5 @@
 log/
-__pycache__/*
+utils/__pycache__/
 test.ipynb
 log*/
 backup/

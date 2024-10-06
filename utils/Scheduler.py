@@ -159,7 +159,7 @@ class Scheduler:
         self.T_wait = config['T_wait']  # maximum tolerable waiting time # TODO 参考了cote的数据，1.8s 为拍摄间隔
         self.device_list = []
         for i in range(self.N):
-            with open(config['cfg_path'][0], 'r') as f:
+            with open(config['cfg_path'][i], 'r') as f:
                 device_config = yaml.safe_load(f)
             self.device_list.append(Device(device_config))
             
@@ -201,18 +201,34 @@ class Scheduler:
     def get_image(self, W, H):
         partition, w, h = self._get_partition_size(W, H)
         hard = random.choice([0, 1])
-        # complexity = (181.7 if hard else 112.4) * w * h / (640 * 640)
-        complexity = 3.46 * w * h / (640 * 640) # TODO 复杂度还需要修改
+        complexity = (3.5 if hard else 2.0) * random.uniform(0.9, 1.1) * w * h / (640 * 640)
+        # complexity = 3.46 * w * h / (640 * 640) # TODO 复杂度还需要修改
         tile_list = [Tiled_image(w, h, complexity, 0)] * partition
         self._assign_tiles(tile_list)
 
     def get_image_no_scheduling(self, W, H):
-        partition, w, h = 1, W, H
+        partition, w, h = self._get_partition_size(W, H)
         hard = random.choice([0, 1])
-        # complexity = (181.7 if hard else 112.4) * w * h / (640 * 640)
-        complexity = 3.46 * w * h / (640 * 640)
+        complexity = (3.5 if hard else 2.0) * random.uniform(0.9, 1.1) * w * h / (640 * 640)
+        # complexity = 3.46 * w * h / (640 * 640)
         tile_list = [Tiled_image(w, h, complexity, 0)] * partition
         self._assign_tiles_no_scheduling(tile_list)
+
+    def get_image_targetfuse(self, W, H):
+        partition, w, h = self._get_partition_size(W, H)
+        hard = random.choice([0, 1])
+        # complexity = (181.7 if hard else 112.4) * w * h / (640 * 640)
+        complexity = 3.4 * random.uniform(0.9, 1.1) * w * h / (640 * 640)
+        tile_list = [Tiled_image(w, h, complexity, 0)] * partition
+        self._assign_tiles(tile_list)
+
+    def get_image_kodan(self, W, H):
+        partition, w, h = self._get_partition_size(W, H)
+        hard = random.choice([0, 1])
+        # complexity = (181.7 if hard else 112.4) * w * h / (640 * 640)
+        complexity = 3.4 * random.uniform(0.9, 1.1) * w * h / (640 * 640)
+        tile_list = [Tiled_image(w, h, complexity, 0)] * partition
+        self._assign_tiles(tile_list)
 
     def update_task(self, total_step_in_sec): # update the task of the devices，return the number of tiles processed
         tile_num = 0

@@ -7,7 +7,7 @@ sys.path.append(utils_dir)
 
 from utils import constant as const
 from utils import utilities
-from utils.Devices import Camera, Computer, Rx, Tx
+from utils.Devices import *
 from utils.Capacitor import Capacitor
 from utils.SolarArray import SolarArray
 from utils.DateTime import DateTime
@@ -81,7 +81,7 @@ def get_conf_files(config_path):
                 ground_station_file_list.append(file_path)
 
 
-def read_data_from_config():
+def read_data_from_config(sim_type = "space_exit"):
     global num_step, hour_step, minute_step, second_step, nanosecond_step, total_step_in_sec, date_time, satellite_list, satid_to_sat, satid_to_occlusion_factor, satid_to_solar_array, satid_to_capacitor, satid_to_node_voltage, satid_to_camera, satid_to_computer, satid_to_rx, satid_to_tx, satid_to_sensor, satid_to_thresh_coeff, satid_to_threshold_km, ground_station_list, gndid_to_gnd, computer_config
     # DONE read num-step.dat, to get the number of steps
     with open(num_step_file, 'r') as num_step_handle:
@@ -170,7 +170,20 @@ def read_data_from_config():
     for satellite in satellite_list:
         sat_id = satellite.get_id()
         satid_to_camera[sat_id] = Camera()
-        satid_to_computer[sat_id] = Computer(computer_config)
+        if sim_type == "space_exit":
+            satid_to_computer[sat_id] = Computer(computer_config)
+        elif sim_type == "base":
+            satid_to_computer[sat_id] = Computer_base(computer_config)
+        elif sim_type == "no_runtime":
+            satid_to_computer[sat_id] = Computer_no_runtime(computer_config)
+        elif sim_type == "no_scheduling":
+            satid_to_computer[sat_id] = Computer_no_scheduling(computer_config)
+        elif sim_type == "target_fuse":
+            satid_to_computer[sat_id] = Computer_targetfuse(computer_config)
+        elif sim_type == "kodan":
+            satid_to_computer[sat_id] = Computer_kodan(computer_config)
+        else:
+            raise ValueError("Invalid simulation type")
         satid_to_rx[sat_id] = Rx()
         satid_to_tx[sat_id] = Tx()
 
@@ -269,9 +282,6 @@ def log_file_init(log_path):
         sensor_trigger_file = os.path.join(log_path, f"{sat_id}-sensor-trigger.csv")
         with open(sensor_trigger_file, 'w') as sensor_trigger_handle:
             sensor_trigger_handle.write("date_time, altidute_km, x_km, y_km, z_km\n")
-        # node_voltage_file = os.path.join(log_path, f"{sat_id}-node-voltage.csv")
-        # with open(node_voltage_file, 'w') as node_voltage_handle:
-        #     node_voltage_handle.write("date_time, node_voltage\n")
         device_state_file = os.path.join(log_path, f"{sat_id}-device-state.csv")
         with open(device_state_file, 'w') as device_state_handle:
             device_state_handle.write("date_time, camera_state, computer_state, rx_state, tx_state\n")
@@ -287,17 +297,21 @@ def log_file_init(log_path):
     
 
 def main():
+    COULOMB_COMPUTER, COULOMB_TX, COULOMB_CAMERA = 50, 45, 40
     # check command line arguments
-    if len(sys.argv) != 3:
-        print("Usage: python {} {} {}".format(sys.argv[0], "path to configuration", "path to log"))
+    if len(sys.argv) != 4:
+        print("Usage: python {} {} {}".format(sys.argv[0], "path to configuration", "path to log", "sim type"))
+        print("sim type: space_exit, base, no_runtime, no_scheduling, target_fuse, kodan")
+        print("Example: python {} {} {}".format(sys.argv[0], "config", "log", "space_exit"))
         return
 
     # configuration file and log file
     config_path = sys.argv[1]
     log_path = sys.argv[2]
+    sim_type = sys.argv[3]
 
     get_conf_files(config_path)
-    read_data_from_config()
+    read_data_from_config(sim_type)
     global satellite_list
     first_sat = satellite_list[0] # TODO 测试仅有一个卫星的情况
     satellite_list = [first_sat]
@@ -333,6 +347,7 @@ def main():
                 capacitor_charge_coulomb = 0
             satid_to_capacitor[sat_id].set_charge_coulomb(capacitor_charge_coulomb)
 
+            # log the energy system data
             if step_count % 1000 == 0:
                 energy_system_file = os.path.join(log_path, f"{sat_id}-energy-system.csv")
                 with open(energy_system_file, 'a') as energy_system_handle:
@@ -432,7 +447,7 @@ def main():
                 gnd_lon = ground_station.get_lon()
                 gnd_hae = ground_station.get_hae()
                 # 如果卫星在通信范围内，且通信系统是关闭的，且有任务需要发送，则打开通信系统
-                if satid_to_tx[sat_id].get_state() == 'OFF' and satid_to_tx[sat_id].get_tx_task_count() > 0 and satid_to_capacitor[sat_id].get_charge_coulomb() > 25: 
+                if satid_to_tx[sat_id].get_state() == 'OFF' and satid_to_tx[sat_id].get_tx_task_count() > 0 and satid_to_capacitor[sat_id].get_charge_coulomb() > COULOMB_TX:
                     satid_to_tx[sat_id].set_state('TX')
                 # if the satellite is not in the communication range, then turn off the communication system
                 if utilities.calc_elevation_deg(jd, sec, ns, gnd_lat, gnd_lon, gnd_hae, sat_eci_posn_km) <= 10:
@@ -495,7 +510,7 @@ def main():
                     compute_task_count = satid_to_computer[sat_id].get_compute_task_count()
                     tx_task_count = satid_to_tx[sat_id].get_tx_task_count()
                     computer_power = satid_to_computer[sat_id].get_power()
-                    device_state_handle.write(f"\t{image_task_count}, {readout_task_count}, {compute_task_count}, {tx_task_count}, {computer_power}\n")
+                    device_state_handle.write(f"image_task_count = {image_task_count}, readout_task_count = {readout_task_count}, compute_task_count = {compute_task_count}, tx_task_count = {tx_task_count}, computer_power = {computer_power}\n")
 
             
             
@@ -550,11 +565,11 @@ def main():
                 satid_to_tx[sat_id].set_state('OFF')
 
             # 电量较低时限制设备的使用，防止因为正反馈导致电量耗尽
-            if satid_to_capacitor[sat_id].get_charge_coulomb() < 30:
+            if satid_to_capacitor[sat_id].get_charge_coulomb() < COULOMB_COMPUTER:
                 satid_to_computer[sat_id].set_state('OFF')
-            if satid_to_capacitor[sat_id].get_charge_coulomb() < 25:
+            if satid_to_capacitor[sat_id].get_charge_coulomb() < COULOMB_TX:
                 satid_to_tx[sat_id].set_state('OFF')
-            if satid_to_capacitor[sat_id].get_charge_coulomb() < 20:
+            if satid_to_capacitor[sat_id].get_charge_coulomb() < COULOMB_CAMERA:
                 satid_to_camera[sat_id].set_state('OFF')
 
             # 更新budget

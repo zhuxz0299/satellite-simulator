@@ -98,6 +98,8 @@ class Device:
         return len(self.batches)
 
     def process_image(self, total_step_in_sec): # 返回处理好的tile的个数，要传给后面的tx设备
+        if self.v == 0: # 如果设备没有速度，说明设备过热，没有工作
+            return 0
         if not self.batches: # 首先判断有没有任务
             if not self.queue: # 连等待的任务都没有了
                 return 0
@@ -236,6 +238,8 @@ class Scheduler:
             device.downclock() # 如果温度过高，就降频
             tile_num += device.process_image(total_step_in_sec)
             device.calc_temperature(total_step_in_sec / 60) # delta_t 的单位是min
+            if device.is_superheat():
+                device.set_power_headroom(0)
         return tile_num
     
     def update_task_no_runtime(self, total_step_in_sec):
@@ -243,6 +247,8 @@ class Scheduler:
         for device in self.device_list:
             tile_num += device.process_image(total_step_in_sec)
             device.calc_temperature(total_step_in_sec / 60)
+            if device.is_superheat():
+                device.set_power_headroom(0)
         return tile_num
     
     def get_task_num(self):
@@ -272,11 +278,13 @@ class Scheduler:
     def get_device_temperature(self):
         return [device.get_temperature() for device in self.device_list]
     
+    # 这两处改动是为了防止一个设备过热，但是另一个设备还能继续工作的情况
+    # 只有当两个设备同时过热，才会让整个计算系统停止工作
     def is_device_superheat(self):
-        return any(device.is_superheat() for device in self.device_list)
+        return all(device.is_superheat() for device in self.device_list)
     
     def in_working_temperature(self):
-        return all(device.in_working_temperature() for device in self.device_list)
+        return any(device.in_working_temperature() for device in self.device_list)
         
     def clear_buffer(self):
         for device in self.device_list:

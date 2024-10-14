@@ -65,16 +65,27 @@ class Device:
         self.top_temperature = config['top_temperature']  # 80 degree Celsius
         self.compute_time_s = 0.0  # compute time of the device
         self.max_power = config['max_power']  # maximum power of the device
+        self.idle_power = config['idle_power']  # idle power of the device
         self.v_power_ratio = eval(config['v_power_ratio'])  # ratio of velocity and power # 速度与功率的比值，这里假定是线性关系
         self.alpha, self.beta = config['alpha'], config['beta'] # temperature control parameters
+        self.is_cooling = "False"
+        self.state = "OFF" # 为了方便计算温度而设定的
 
     def _calc_batch_size(self, tile_size):
         self.batchsize = math.floor(self.memory / tile_size)
         if self.batchsize < 1: # 如果batchsize小于1，就设置为1，防止 group_tiles 函数出现死循环
             self.batchsize = 1
 
+    def set_state(self, state):
+        self.state = state
+
     def get_processing_time(self): # 预计处理时间
+        if self.v == 0:
+            return 1e9
         return self.total_complexity / self.v
+
+    def get_complexity(self):
+        return self.total_complexity
 
     def add_tile(self, tile): # 向硬盘中添加tile
         self.queue.append(tile)
@@ -102,12 +113,14 @@ class Device:
             return 0
         if not self.batches: # 首先判断有没有任务
             if not self.queue: # 连等待的任务都没有了
+                self.power_headroom = self.idle_power
                 return 0
             self.group_tiles() # 加入新的任务
         self.compute_time_s += total_step_in_sec
         tile_num = 0
         while self.batches and self.compute_time_s >= self.batches[0].get_complexity() / self.v:
             self.compute_time_s -= self.batches[0].get_complexity() / self.v
+            self.total_complexity -= self.batches[0].get_complexity()
             self.resource -= self.batches[0].get_size()
             tile_num += self.batches[0].get_tile_num()
             self.batches.pop(0)
@@ -115,23 +128,31 @@ class Device:
 
     def set_power_headroom(self, power_headroom): # power_headroom 应该会随着设备的使用而变化
         self.power_headroom = min(power_headroom, self.max_power)
-        self.v = self.v_power_ratio * self.power_headroom # 速度与功率成正比
+        if self.power_headroom <= self.idle_power:
+            self.state = "OFF"
+            self.power_headroom = 0
+            self.v = 0
+        else:
+            self.v = self.v_power_ratio * (self.power_headroom - self.idle_power) # 速度与功率成正比
 
     def power_sensitivity(self, P):
         # return np.power(P, -0.5)
         return self.v_power_ratio
 
     def get_power(self):
-        if not self.batches and not self.queue: # 没有任务
+        if self.power_headroom == 0:
             return 0
+        if not self.batches and not self.queue: # 没有任务
+            return self.idle_power
         else: # 有任务，返回分配给设备的功率
             return self.power_headroom
-        
+
     def calc_temperature(self, delta_t):
         ambient_temperature = 2.73 # 2.73K
-        # print(f"power headroom: {self.power_headroom}, temperature: {self.temperature}", end=", ")
-        self.temperature += self.alpha * (self.power_headroom - self.beta * (self.temperature**4 - ambient_temperature**4)) * delta_t # 拟合的时候delta_t的单位是min
-        # print(f"new temperature: {self.temperature}")
+        if self.state == "OFF":
+            self.temperature += self.alpha * (self.idle_power - self.beta * (self.temperature**4 - ambient_temperature**4)) * delta_t
+        else:
+            self.temperature += self.alpha * (self.power_headroom - self.beta * (self.temperature**4 - ambient_temperature**4)) * delta_t # 拟合的时候delta_t的单位是min
         return self.temperature
 
     def get_temperature(self):
@@ -142,6 +163,12 @@ class Device:
     
     def in_working_temperature(self):
         return self.temperature < self.top_temperature - 9 # 相比降频温度留一点容错
+    
+    def get_cooling(self):
+        return self.is_cooling
+    
+    def set_cooling(self, cooling):
+        self.is_cooling = cooling
     
     def downclock(self):
         if self.temperature > self.top_temperature - 10:
@@ -200,6 +227,10 @@ class Scheduler:
         for device in self.device_list:
             device.group_tiles()
 
+    def set_device_state(self, state):
+        for device in self.device_list:
+            device.set_state(state)
+
     def get_image(self, W, H):
         partition, w, h = self._get_partition_size(W, H)
         hard = random.choice([0, 1])
@@ -236,19 +267,19 @@ class Scheduler:
         tile_num = 0
         for device in self.device_list:
             device.downclock() # 如果温度过高，就降频
-            tile_num += device.process_image(total_step_in_sec)
-            device.calc_temperature(total_step_in_sec / 60) # delta_t 的单位是min
             if device.is_superheat():
                 device.set_power_headroom(0)
+                device.set_cooling("True")
+            tile_num += device.process_image(total_step_in_sec)
         return tile_num
     
     def update_task_no_runtime(self, total_step_in_sec):
         tile_num = 0
         for device in self.device_list:
-            tile_num += device.process_image(total_step_in_sec)
-            device.calc_temperature(total_step_in_sec / 60)
             if device.is_superheat():
                 device.set_power_headroom(0)
+                device.set_cooling("True")
+            tile_num += device.process_image(total_step_in_sec)
         return tile_num
     
     def get_task_num(self):
@@ -266,11 +297,25 @@ class Scheduler:
                 break
             power_allocations = new_power_allocations
         for i in range(self.N):
-            self.device_list[i].set_power_headroom(power_allocations[i])
+            if self.device_list[i].get_cooling() == "True":
+                if self.device_list[i].in_working_temperature():
+                    self.device_list[i].set_cooling("False")
+                    self.device_list[i].set_power_headroom(power_allocations[i])
+                else:
+                    self.device_list[i].set_power_headroom(0)
+            else:
+                self.device_list[i].set_power_headroom(power_allocations[i])
 
     def power_allocation_no_runtime(self, available_power):
         for device in self.device_list:
-            device.set_power_headroom(available_power / self.N)
+            if device.get_cooling() == "True":
+                if device.in_working_temperature():
+                    device.set_cooling("False")
+                    device.set_power_headroom(available_power/self.N)
+                else:
+                    device.set_power_headroom(0)
+            else:
+                device.set_power_headroom(available_power/self.N)
 
     def get_power(self): # get the total power of the devices
         return sum(device.get_power() for device in self.device_list)
@@ -285,6 +330,9 @@ class Scheduler:
     
     def in_working_temperature(self):
         return any(device.in_working_temperature() for device in self.device_list)
+    
+    def update_temperature(self, delta_t):
+        return [device.calc_temperature(delta_t) for device in self.device_list]
         
     def clear_buffer(self):
         for device in self.device_list:

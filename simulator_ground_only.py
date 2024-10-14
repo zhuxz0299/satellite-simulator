@@ -257,6 +257,9 @@ def log_file_init(log_path):
         communication_file = os.path.join(log_path, f"{sat_id}-communication.csv")
         with open(communication_file, 'w') as communication_handle:
             communication_handle.write("date_time, gnd_id\n")
+        energy_system_file = os.path.join(log_path, f"{sat_id}-energy-system.csv")
+        with open(energy_system_file, 'w') as energy_system_handle:
+            energy_system_handle.write("date_time, node_voltage, total_load_current_ampere, solar_array_ampere, capacitor_charge_coulomb\n")
     
 
 def main():
@@ -276,10 +279,10 @@ def main():
     satellite_list = [first_sat]
     log_file_init(log_path)
 
-    # --------------------- simulation loop --------------------- #
     step_count = 0
     sensor_image_num, trans_tile_num = 0, 0 # 记录sensor触发的次数和transmit的tile数
     while step_count < num_step: 
+        # --------------------- simulation loop --------------------- #
         jd = utilities.calc_julian_day_from_ymd(date_time.get_year(), date_time.get_month(), date_time.get_day())
         sec = utilities.calc_sec_since_midnight(date_time.get_hour(), date_time.get_minute(), date_time.get_second())
         ns = date_time.get_nanosecond()
@@ -304,6 +307,12 @@ def main():
             if capacitor_charge_coulomb < 0:
                 capacitor_charge_coulomb = 0
             satid_to_capacitor[sat_id].set_charge_coulomb(capacitor_charge_coulomb)
+
+            # log the energy system data
+            if step_count % 1000 == 0:
+                energy_system_file = os.path.join(log_path, f"{sat_id}-energy-system.csv")
+                with open(energy_system_file, 'a') as energy_system_handle:
+                    energy_system_handle.write(f"{satellite.get_local_time()}, {satid_to_node_voltage[sat_id]}, {total_load_current_ampere}, {satid_to_solar_array[sat_id].get_current_ampere()}, {satid_to_capacitor[sat_id].get_charge_coulomb()}\n")
             
             ##################################### simulate the camera #####################################
             if satid_to_camera[sat_id].get_state() == 'IMAGING':
@@ -364,7 +373,7 @@ def main():
                     sensor_trigger_handle.write(f"{satellite.get_local_time()}, ")
                     sensor_trigger_handle.write(f"{sat_alt_km}, {sat_eci_posn_km[0]}, {sat_eci_posn_km[1]}, {sat_eci_posn_km[2]}\n")
 
-            ##################################### simulate the satellite communication system #####################################
+            ##################################### communication system #####################################
             if satellite.get_gnd_id_com() is not None: # if the satellite is communicating with a ground station
                 gnd_id = satellite.get_gnd_id_com()
                 ground_station = gndid_to_gnd[gnd_id]
@@ -393,7 +402,7 @@ def main():
                         # log 
                         communication_file = os.path.join(log_path, f"{sat_id}-communication.csv")
                         with open(communication_file, 'a') as communication_handle:
-                            communication_handle.write(f"{satellite.get_local_time()}, {gnd_id}, sensor_image_num = {sensor_image_num}, trans_tile_num = {trans_tile_num}, \n")
+                            communication_handle.write(f"{satellite.get_local_time()}, {gnd_id}\n")
                         satid_to_tx[sat_id].set_state('TX')
                         satid_to_rx[sat_id].set_state('RX')
                         satid_to_rx[sat_id].set_rx_time_s(-sat_alt_km / const.SPEED_OF_LIGHT_KM_S)  # consider the time delay
@@ -419,15 +428,20 @@ def main():
                     satid_to_rx[sat_id].set_state('OFF')
                 satid_to_rx[sat_id].set_rx_time_s(rx_time_s)
 
-            # log the data
+            ##################################### log the data #####################################
             if (satid_to_camera[sat_id].get_state() != satid_to_camera[sat_id].get_prev_state()) or (satid_to_rx[sat_id].get_state() != satid_to_rx[sat_id].get_prev_state()) or (satid_to_tx[sat_id].get_state() != satid_to_tx[sat_id].get_prev_state()):
                 device_state_file = os.path.join(log_path, f"{sat_id}-device-state.csv")
                 with open(device_state_file, 'a') as device_state_handle:
                     device_state_handle.write(f"{satellite.get_local_time()}, ")
                     device_state_handle.write(f"{satid_to_camera[sat_id].get_state()}, {satid_to_rx[sat_id].get_state()}, {satid_to_tx[sat_id].get_state()}\n")
+                    image_task_count = satid_to_camera[sat_id].get_image_task_count()
+                    readout_task_count = satid_to_camera[sat_id].get_readout_task_count()
+                    tx_task_count = satid_to_tx[sat_id].get_tx_task_count()
+                    device_state_handle.write(f"image_task_count = {image_task_count}, readout_task_count = {readout_task_count}, tx_task_count = {tx_task_count}\n")
+
 
             
-        # update simulation to the next step
+        # --------------------- update simulation to the next step --------------------- #
         date_time.update(hour_step, minute_step, second_step, nanosecond_step)
         
         for satellite in satellite_list:
@@ -440,6 +454,7 @@ def main():
             satid_to_rx[sat_id].set_prev_state(satid_to_rx[sat_id].get_state())
             satid_to_tx[sat_id].set_prev_state(satid_to_tx[sat_id].get_state())
 
+            ##################################### update the time of the devices #####################################
             if satid_to_camera[sat_id].get_state() == 'IMAGING':
                 image_time_s = satid_to_camera[sat_id].get_image_time_s()
                 satid_to_camera[sat_id].set_image_time_s(image_time_s + total_step_in_sec)
@@ -454,9 +469,10 @@ def main():
                 rx_time_s = satid_to_rx[sat_id].get_rx_time_s()
                 satid_to_rx[sat_id].set_rx_time_s(rx_time_s + total_step_in_sec)
 
+            ##################################### update the position of the sensor #####################################
             satid_to_sensor[sat_id].set_eci_posn(sat_eci_posn_km)
 
-
+            ##################################### update the power of the satellite #####################################
             power_w = satid_to_camera[sat_id].get_power() + satid_to_rx[sat_id].get_power() + satid_to_tx[sat_id].get_power()
             
             # 保留 cote 中的处理方法，因为这里不需要考虑计算机功率的问题，相对比较稳定
@@ -489,13 +505,12 @@ def main():
                 satid_to_solar_array[sat_id].get_current_ampere(),
                 satid_to_capacitor[sat_id].get_esr_ohm(),
             )
-
             satid_to_camera[sat_id].set_node_voltage(node_voltage)
             satid_to_rx[sat_id].set_node_voltage(node_voltage)
             satid_to_tx[sat_id].set_node_voltage(node_voltage)
             satid_to_node_voltage[sat_id] = node_voltage
 
-
+            ##################################### update the ground stations #####################################
             for ground_station in ground_station_list:
                 ground_station.update(hour_step, minute_step, second_step, nanosecond_step)
         step_count += 1

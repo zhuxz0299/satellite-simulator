@@ -1,9 +1,13 @@
+# 数据来源：https://www.leadtek.com.cn/embedded-systems/#:~:text=Jetson%20Orin%20Nano%20%E7%B3%BB%E5%88%97,%E7%93%A6%E4%B9%8B%E9%97%B4%E8%BF%9B%E8%A1%8C%E9%80%89%E6%8B%A9%E3%80%82
+# 待机功耗数据来源：https://www.ecice06.com/article/2021/1000-3428/212233.htm
+
 memory: 4e9/12 # 4GB，一个pixel 12 bytes
 model_memory: 3e8/12 # 300MB
 temperature: 298 # 25 degree
 top_temperature: 353 # 80 degree
 bottom_temperature: 248
 max_power: 10 # 10W，NVIDIA Jetson Nano
-v_power_ratio: 472/10 # 472GFLOPS/10W
+idle_power: 1.4 # 1.4W
+v_power_ratio: 472/(10-1.4) # 472GFLOPS/10-1.4W
 alpha: 2.285 # temperature coefficient
 beta: 2.8797e-10 # temperature coefficient

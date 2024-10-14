@@ -380,8 +380,8 @@ def main():
                     readout_time_s -= readout_duration_s
                     readout_task_count -= 1
                     satid_to_computer[sat_id].assign_task() # 自动给computer分配一个任务
-                    if satid_to_computer[sat_id].get_state() == 'OFF' and satid_to_computer[sat_id].in_working_temperature():
-                        satid_to_computer[sat_id].set_state('WORK') # 应该是合理的，能量不足时所有设备都会关机；这里相机在工作，所以能量应该够用。
+                    if satid_to_computer[sat_id].get_state() == 'OFF' and satid_to_capacitor[sat_id].get_charge_coulomb() > COULOMB_COMPUTER: # 如果电量充足，就打开computer
+                        satid_to_computer[sat_id].set_state('WORK')
                 satid_to_camera[sat_id].set_readout_time_s(readout_time_s)
                 satid_to_camera[sat_id].set_readout_task_count(readout_task_count)
                 # satid_to_computer[sat_id].set_compute_task_count(compute_task_count)
@@ -408,8 +408,10 @@ def main():
                 tile_num = satid_to_computer[sat_id].update_task(total_step_in_sec)
                 tx_task_count = satid_to_tx[sat_id].get_tx_task_count()
                 satid_to_tx[sat_id].set_tx_task_count(tx_task_count + tile_num)
-                if satid_to_computer[sat_id].get_power() == 0: # 在开机状态下，如果没有任务，就会自动关机
+                if satid_to_computer[sat_id].get_power() == 0: # 在开机状态下，如果功率不足，就会自动关机
                     satid_to_computer[sat_id].set_state('OFF')
+
+            satid_to_computer[sat_id].update_temperature(total_step_in_sec)
 
             ##################################### simulate satellite sensor #####################################
             prev_sense_posn = satid_to_sensor[sat_id].get_prev_sense_posn()
@@ -455,7 +457,7 @@ def main():
                     satid_to_tx[sat_id].set_state('OFF')
                     satid_to_rx[sat_id].set_state('OFF')
                     satid_to_computer[sat_id].clear_buffer() # TODO 在经过了通信之后，清空所有任务，即将通信作为一次deadline
-                    satid_to_tx[sat_id].set_tx_task_count(0) 
+                    satid_to_tx[sat_id].set_tx_task_count(0)
                     satid_to_camera[sat_id].set_image_task_count(0)
                     satid_to_camera[sat_id].set_readout_task_count(0)
                     # log
@@ -512,7 +514,7 @@ def main():
                     computer_power = satid_to_computer[sat_id].get_power()
                     device_state_handle.write(f"image_task_count = {image_task_count}, readout_task_count = {readout_task_count}, compute_task_count = {compute_task_count}, tx_task_count = {tx_task_count}, computer_power = {computer_power}\n")
 
-            
+
             
         # --------------------- update simulation to the next step --------------------- #
         date_time.update(hour_step, minute_step, second_step, nanosecond_step)

@@ -91,6 +91,7 @@ class Computer:
     ####################### Device 类自身数据 #######################
     def set_state(self, state):
         self.state = state
+        self.scheduler.set_device_state(state)
 
     def get_state(self):
         return self.state
@@ -142,6 +143,9 @@ class Computer:
     def in_working_temperature(self):
         return self.scheduler.in_working_temperature()
 
+    def update_temperature(self, total_step_in_sec):
+        self.scheduler.update_temperature(total_step_in_sec/60)
+
     def clear_buffer(self):
         self.scheduler.clear_buffer()
 
@@ -166,6 +170,7 @@ class Computer_no_scheduling:
     ####################### Device 类自身数据 #######################
     def set_state(self, state):
         self.state = state
+        self.scheduler.set_device_state(state)
 
     def get_state(self):
         return self.state
@@ -217,6 +222,9 @@ class Computer_no_scheduling:
     def in_working_temperature(self):
         return self.scheduler.in_working_temperature()
 
+    def update_temperature(self, total_step_in_sec):
+        self.scheduler.update_temperature(total_step_in_sec/60)
+
     def clear_buffer(self):
         self.scheduler.clear_buffer()
 
@@ -241,6 +249,7 @@ class Computer_no_runtime:
     ####################### Device 类自身数据 #######################
     def set_state(self, state):
         self.state = state
+        self.scheduler.set_device_state(state)
 
     def get_state(self):
         return self.state
@@ -292,6 +301,9 @@ class Computer_no_runtime:
     def in_working_temperature(self):
         return self.scheduler.in_working_temperature()
 
+    def update_temperature(self, total_step_in_sec):
+        self.scheduler.update_temperature(total_step_in_sec/60)
+
     def clear_buffer(self):
         self.scheduler.clear_buffer()
 
@@ -317,6 +329,7 @@ class Computer_targetfuse:
     ####################### Device 类自身数据 #######################
     def set_state(self, state):
         self.state = state
+        self.scheduler.set_device_state(state)
 
     def get_state(self):
         return self.state
@@ -368,6 +381,9 @@ class Computer_targetfuse:
     def in_working_temperature(self):
         return self.scheduler.in_working_temperature()
 
+    def update_temperature(self, total_step_in_sec):
+        self.scheduler.update_temperature(total_step_in_sec/60)
+
     def clear_buffer(self):
         self.scheduler.clear_buffer()
 
@@ -392,6 +408,7 @@ class Computer_kodan:
     ####################### Device 类自身数据 #######################
     def set_state(self, state):
         self.state = state
+        self.scheduler.set_device_state(state)
 
     def get_state(self):
         return self.state
@@ -443,6 +460,9 @@ class Computer_kodan:
     def in_working_temperature(self):
         return self.scheduler.in_working_temperature()
 
+    def update_temperature(self, total_step_in_sec):
+        self.scheduler.update_temperature(total_step_in_sec/60)
+
     def clear_buffer(self):
         self.scheduler.clear_buffer()
 
@@ -480,6 +500,7 @@ class Computer_base:
     ####################### Device 类自身数据 #######################
     def set_state(self, state):
         self.state = state
+        self.scheduler.set_device_state(state)
 
     def get_state(self):
         return self.state
@@ -530,7 +551,10 @@ class Computer_base:
     
     def in_working_temperature(self):
         return self.scheduler.in_working_temperature()
-    
+
+    def update_temperature(self, total_step_in_sec):
+        self.scheduler.update_temperature(total_step_in_sec/60)
+
     def clear_buffer(self):
         self.scheduler.clear_buffer()
     
@@ -639,7 +663,7 @@ class Rx:
         
 class Tx:
     tx_duration_s = 0.0032 # TODO 处理后文件大小定为40KB(DynamicDet)，传输速率为100Mbps(参考starlink数据)
-    tx_image_duration_s = 0.36 # 图片大小为4096*3072，传输速率为100Mbps，假设是RGB图片
+    tx_image_duration_s = 3.02 # 图片大小为4096*3072，传输速率为100Mbps，假设是RGB图片(4096*3072*24/100e6 = 3.02)
     state = 'OFF'
     prev_state = 'OFF'
     node_voltage = 0
